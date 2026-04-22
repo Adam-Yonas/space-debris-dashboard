@@ -7,8 +7,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
+import os
+DATA_DIR = Path(os.getcwd()) / "data"
 
 ALTITUDE_BINS_FILE = DATA_DIR / "altitude_bins.json"
 ORBITAL_REGIMES_FILE = DATA_DIR / "orbital_regimes.json"
