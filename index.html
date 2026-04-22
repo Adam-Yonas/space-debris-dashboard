@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Space Debris Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main>
+    <h1>Space Debris Dashboard</h1>
+    <p class="subtitle">
+      3D orbit visualization with altitude, inclination, eccentricity, and mission-duration-based risk assessment.
+    </p>
+
+    <section class="controls">
+      <div class="control-group">
+        <label for="altitudeInput">Proposed orbit altitude (km)</label>
+        <input id="altitudeInput" type="number" min="160" max="40000" step="1" placeholder="e.g. 550" />
+      </div>
+
+      <div class="control-group">
+        <label for="inclinationInput">Proposed inclination (deg)</label>
+        <input id="inclinationInput" type="number" min="0" max="180" step="0.1" placeholder="e.g. 97.6" />
+      </div>
+
+      <div class="control-group">
+        <label for="eccentricityInput">Proposed eccentricity</label>
+        <input id="eccentricityInput" type="number" min="0" max="0.2" step="0.001" placeholder="e.g. 0.001" />
+      </div>
+
+      <div class="control-group">
+        <label for="durationInput">Mission duration (years)</label>
+        <input id="durationInput" type="number" min="0.1" max="20" step="0.1" placeholder="e.g. 3" />
+      </div>
+
+      <button id="assessButton">Assess Orbit</button>
+    </section>
+
+    <section class="advanced-panel">
+      <details>
+        <summary>Advanced Options</summary>
+        <div class="advanced-grid">
+          <div class="control-group">
+            <label for="raanInput">RAAN (deg)</label>
+            <input id="raanInput" type="number" min="0" max="360" step="0.1" placeholder="e.g. 15" />
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="results" id="resultsCard">
+      <h2>Orbit Assessment</h2>
+      <p id="selectedOrbit">Enter orbit parameters, then click “Assess Orbit.”</p>
+      <p id="riskScore"></p>
+      <p id="riskLevel"></p>
+      <p id="matchingObjects"></p>
+      <p id="missionExposure"></p>
+      <p id="recommendation"></p>
+    </section>
+
+    <section class="chart-section">
+      <div id="orbit3d"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

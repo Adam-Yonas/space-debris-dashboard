@@ -1,0 +1,105 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 2rem;
+    background: #0b1020;
+    color: #f5f7ff;
+  }
+  
+  main {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  
+  h1 {
+    margin-bottom: 0.5rem;
+  }
+  
+  .subtitle {
+    margin-top: 0;
+    margin-bottom: 1.5rem;
+    color: #c8d2ff;
+  }
+  
+  .controls,
+  .results,
+  .chart-section {
+    background: #121933;
+    border: 1px solid #28345f;
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  .controls {
+    display: flex;
+    gap: 1rem;
+    align-items: end;
+    flex-wrap: wrap;
+  }
+  
+  .control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  
+  label {
+    font-weight: 600;
+  }
+  
+  input {
+    padding: 0.7rem;
+    border-radius: 8px;
+    border: 1px solid #44568e;
+    background: #0f1530;
+    color: #f5f7ff;
+    min-width: 220px;
+  }
+  
+  button {
+    padding: 0.8rem 1rem;
+    border: none;
+    border-radius: 8px;
+    background: #6c8cff;
+    color: white;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  
+  button:hover {
+    opacity: 0.9;
+  }
+  
+  .results p {
+    margin: 0.45rem 0;
+  }
+  
+  #orbit3d {
+    width: 100%;
+    height: 700px;
+  }
+
+  .advanced-panel {
+    margin-bottom: 1.5rem;
+  }
+  
+  .advanced-panel details {
+    background: #121933;
+    border: 1px solid #28345f;
+    border-radius: 12px;
+    padding: 1rem;
+  }
+  
+  .advanced-panel summary {
+    cursor: pointer;
+    font-weight: 700;
+    margin-bottom: 0.75rem;
+  }
+  
+  .advanced-grid {
+    margin-top: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }

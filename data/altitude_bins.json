@@ -1,0 +1,26 @@
+[
+  {
+    "altitude_bin_km": 200,
+    "count": 1
+  },
+  {
+    "altitude_bin_km": 300,
+    "count": 3
+  },
+  {
+    "altitude_bin_km": 350,
+    "count": 14
+  },
+  {
+    "altitude_bin_km": 400,
+    "count": 8
+  },
+  {
+    "altitude_bin_km": 450,
+    "count": 1
+  },
+  {
+    "altitude_bin_km": 1500,
+    "count": 1
+  }
+]
