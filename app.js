@@ -1,5 +1,5 @@
 // 🔴 CHANGE THIS to your Render URL
-const API_BASE = "https://space-debris-dashboard.onrender.com/";
+const API_BASE = "https://space-debris-dashboard.onrender.com";
 
 let orbitTracks = [];
 let currentUserOrbit = null;
