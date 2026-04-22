@@ -1,3 +1,6 @@
+// 🔴 CHANGE THIS to your Render URL
+const API_BASE = "https://space-debris-api.onrender.com";
+
 let orbitTracks = [];
 let currentUserOrbit = null;
 
@@ -12,74 +15,62 @@ async function fetchJson(url, options = {}) {
   return await response.json();
 }
 
+// ========================
+// LOAD DATA FROM API
+// ========================
 async function loadOrbitTracks() {
-  orbitTracks = await fetchJson("http://127.0.0.1:8000/orbit-tracks?limit=40");
+  orbitTracks = await fetchJson(`${API_BASE}/orbit-tracks?limit=40`);
   render3DPlot();
 }
 
+// ========================
+// EARTH SPHERE
+// ========================
 function buildEarthSphere() {
-  const earthRadiusKm = 6378.137;
-  const uSteps = 40;
-  const vSteps = 40;
+  const R = 6378.137;
+  const x = [], y = [], z = [];
 
-  const x = [];
-  const y = [];
-  const z = [];
+  for (let i = 0; i <= 40; i++) {
+    const theta = Math.PI * i / 40;
+    const xr = [], yr = [], zr = [];
 
-  for (let i = 0; i <= uSteps; i++) {
-    const theta = Math.PI * i / uSteps;
-    const xRow = [];
-    const yRow = [];
-    const zRow = [];
-
-    for (let j = 0; j <= vSteps; j++) {
-      const phi = 2 * Math.PI * j / vSteps;
-      xRow.push(earthRadiusKm * Math.sin(theta) * Math.cos(phi));
-      yRow.push(earthRadiusKm * Math.sin(theta) * Math.sin(phi));
-      zRow.push(earthRadiusKm * Math.cos(theta));
+    for (let j = 0; j <= 40; j++) {
+      const phi = 2 * Math.PI * j / 40;
+      xr.push(R * Math.sin(theta) * Math.cos(phi));
+      yr.push(R * Math.sin(theta) * Math.sin(phi));
+      zr.push(R * Math.cos(theta));
     }
 
-    x.push(xRow);
-    y.push(yRow);
-    z.push(zRow);
+    x.push(xr);
+    y.push(yr);
+    z.push(zr);
   }
 
   return {
     type: "surface",
-    x,
-    y,
-    z,
+    x, y, z,
     opacity: 0.85,
-    showscale: false,
-    hoverinfo: "skip",
-    colorscale: [
-      [0, "#1b2a6b"],
-      [1, "#355caa"]
-    ]
+    showscale: false
   };
 }
 
-function buildUserOrbitTrack(altitudeKm, inclinationDeg, eccentricity = 0, raanDeg = 0, numPoints = 128) {
-  const earthRadiusKm = 6378.137;
-  const semiMajorAxis = earthRadiusKm + altitudeKm;
-
-  const inc = inclinationDeg * Math.PI / 180;
+// ========================
+// USER ORBIT
+// ========================
+function buildUserOrbitTrack(alt, incDeg, ecc = 0, raanDeg = 0) {
+  const R = 6378.137 + alt;
+  const inc = incDeg * Math.PI / 180;
   const raan = raanDeg * Math.PI / 180;
 
-  const x = [];
-  const y = [];
-  const z = [];
+  const x = [], y = [], z = [];
 
-  for (let k = 0; k <= numPoints; k++) {
-    const nu = 2 * Math.PI * k / numPoints;
+  for (let k = 0; k <= 128; k++) {
+    const nu = 2 * Math.PI * k / 128;
+    const r = R * (1 - ecc ** 2) / (1 + ecc * Math.cos(nu));
 
-    const r = semiMajorAxis * (1 - eccentricity ** 2) / (1 + eccentricity * Math.cos(nu));
-
-    // Perifocal frame
     const xp = r * Math.cos(nu);
     const yp = r * Math.sin(nu);
 
-    // Rotate by inclination and RAAN; arg of perigee assumed 0 for user display
     const xe = xp * Math.cos(raan) - yp * Math.sin(raan) * Math.cos(inc);
     const ye = xp * Math.sin(raan) + yp * Math.cos(raan) * Math.cos(inc);
     const ze = yp * Math.sin(inc);
@@ -92,9 +83,13 @@ function buildUserOrbitTrack(altitudeKm, inclinationDeg, eccentricity = 0, raanD
   return { x, y, z };
 }
 
+// ========================
+// 3D PLOT
+// ========================
 function render3DPlot() {
   const traces = [buildEarthSphere()];
 
+  // Debris orbits
   for (const track of orbitTracks) {
     traces.push({
       type: "scatter3d",
@@ -102,19 +97,12 @@ function render3DPlot() {
       x: track.x,
       y: track.y,
       z: track.z,
-      line: {
-        width: 2,
-        color: "#7ea6ff"
-      },
-      opacity: 0.45,
-      name: track.object_name,
-      hovertemplate:
-        `<b>${track.object_name}</b><br>` +
-        `Altitude: ${track.altitude_km} km<br>` +
-        `Inclination: ${track.inclination_deg}°<extra></extra>`
+      line: { width: 2, color: "#7ea6ff" },
+      opacity: 0.4
     });
   }
 
+  // User orbit
   if (currentUserOrbit) {
     const userTrack = buildUserOrbitTrack(
       currentUserOrbit.altitude_km,
@@ -129,179 +117,91 @@ function render3DPlot() {
       x: userTrack.x,
       y: userTrack.y,
       z: userTrack.z,
-      line: {
-        width: 7,
-        color: "#ff9f43"
-      },
-      name: "Proposed Orbit",
-      hovertemplate:
-        `<b>Proposed Orbit</b><br>` +
-        `Altitude: ${currentUserOrbit.altitude_km} km<br>` +
-        `Inclination: ${currentUserOrbit.inclination_deg}°<br>` +
-        `Eccentricity: ${currentUserOrbit.eccentricity}<br>` +
-        `RAAN: ${currentUserOrbit.raan_deg}°<extra></extra>`
+      line: { width: 6, color: "#ff9f43" }
     });
   }
 
-  const layout = {
-    title: "3D Orbit Visualization",
+  Plotly.newPlot("orbit3d", traces, {
     paper_bgcolor: "#121933",
-    plot_bgcolor: "#121933",
-    font: {
-      color: "#f5f7ff"
-    },
-    scene: {
-      bgcolor: "#121933",
-      xaxis: {
-        title: "X (km)",
-        color: "#f5f7ff",
-        gridcolor: "#33406f",
-        zerolinecolor: "#33406f"
-      },
-      yaxis: {
-        title: "Y (km)",
-        color: "#f5f7ff",
-        gridcolor: "#33406f",
-        zerolinecolor: "#33406f"
-      },
-      zaxis: {
-        title: "Z (km)",
-        color: "#f5f7ff",
-        gridcolor: "#33406f",
-        zerolinecolor: "#33406f"
-      },
-      aspectmode: "data",
-      camera: {
-        eye: { x: 1.4, y: 1.4, z: 0.9 }
-      }
-    },
-    margin: { l: 0, r: 0, t: 50, b: 0 },
-    showlegend: false
-  };
-
-  Plotly.newPlot("orbit3d", traces, layout, { responsive: true });
+    scene: { aspectmode: "data" },
+    margin: { l: 0, r: 0, t: 40, b: 0 }
+  });
 }
 
+// ========================
+// API CALL FOR RISK
+// ========================
 async function assessOrbitViaApi(payload) {
-  return await fetchJson("http://127.0.0.1:8000/assess-orbit", {
+  return await fetchJson(`${API_BASE}/assess-orbit`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
 }
 
-async function updateAssessment(orbitInput) {
-  const selectedOrbitEl = document.getElementById("selectedOrbit");
-  const riskScoreEl = document.getElementById("riskScore");
-  const riskLevelEl = document.getElementById("riskLevel");
-  const matchingObjectsEl = document.getElementById("matchingObjects");
-  const missionExposureEl = document.getElementById("missionExposure");
-  const recommendationEl = document.getElementById("recommendation");
+// ========================
+// UPDATE UI
+// ========================
+async function updateAssessment(input) {
+  const res = await assessOrbitViaApi(input);
 
-  const apiResponse = await assessOrbitViaApi(orbitInput);
+  const result = res.result;
 
-  const result = apiResponse.result;
-  const recommendation = apiResponse.recommendation;
+  document.getElementById("selectedOrbit").textContent =
+    `Orbit: ${input.altitude_km} km, ${input.inclination_deg}°`;
 
-  selectedOrbitEl.textContent =
-    `Selected orbit: ${orbitInput.altitude_km} km altitude, ${orbitInput.inclination_deg}° inclination, e=${orbitInput.eccentricity}, ${orbitInput.mission_years} year mission`;
+  document.getElementById("riskScore").textContent =
+    `Risk: ${result.risk_score}/100`;
 
-  riskScoreEl.textContent = `Orbital regime risk score: ${result.risk_score} / 100`;
-  riskLevelEl.textContent = `Risk level: ${result.risk_level}`;
-  matchingObjectsEl.textContent =
-    `Nearby matching debris objects in this simplified regime window: ${result.close_matches}`;
-  missionExposureEl.textContent =
-    `Mission duration multiplier applied: ${result.duration_factor}x`;
-  recommendationEl.textContent = recommendation;
+  document.getElementById("riskLevel").textContent =
+    `Level: ${result.risk_level}`;
 
-  currentUserOrbit = orbitInput;
+  document.getElementById("matchingObjects").textContent =
+    `Nearby objects: ${result.close_matches}`;
+
+  document.getElementById("missionExposure").textContent =
+    `Duration factor: ${result.duration_factor}x`;
+
+  document.getElementById("recommendation").textContent =
+    res.recommendation;
+
+  currentUserOrbit = input;
   render3DPlot();
 }
 
-function getFormValues() {
-  const altitudeInput = document.getElementById("altitudeInput");
-  const inclinationInput = document.getElementById("inclinationInput");
-  const eccentricityInput = document.getElementById("eccentricityInput");
-  const durationInput = document.getElementById("durationInput");
-  const raanInput = document.getElementById("raanInput");
-
-  const altitude = Number(altitudeInput.value);
-  const inclination = Number(inclinationInput.value);
-  const eccentricity = Number(eccentricityInput.value);
-  const missionYears = Number(durationInput.value);
-  const raan = raanInput.value === "" ? 0 : Number(raanInput.value);
-
-  if (Number.isNaN(altitude) || altitude < 160) {
-    throw new Error("Please enter a valid altitude of at least 160 km.");
-  }
-
-  if (Number.isNaN(inclination) || inclination < 0 || inclination > 180) {
-    throw new Error("Please enter a valid inclination between 0 and 180 degrees.");
-  }
-
-  if (Number.isNaN(eccentricity) || eccentricity < 0 || eccentricity > 0.2) {
-    throw new Error("Please enter a valid eccentricity between 0 and 0.2.");
-  }
-
-  if (Number.isNaN(missionYears) || missionYears <= 0 || missionYears > 20) {
-    throw new Error("Please enter a valid mission duration in years.");
-  }
-
-  if (Number.isNaN(raan) || raan < 0 || raan > 360) {
-    throw new Error("Please enter a valid RAAN between 0 and 360 degrees.");
-  }
-
+// ========================
+// INPUT HANDLING
+// ========================
+function getInputs() {
   return {
-    altitude_km: altitude,
-    inclination_deg: inclination,
-    eccentricity: eccentricity,
-    mission_years: missionYears,
-    raan_deg: raan
+    altitude_km: Number(document.getElementById("altitudeInput").value),
+    inclination_deg: Number(document.getElementById("inclinationInput").value),
+    eccentricity: Number(document.getElementById("eccentricityInput").value),
+    mission_years: Number(document.getElementById("durationInput").value),
+    raan_deg: Number(document.getElementById("raanInput").value || 0)
   };
 }
 
 function setupControls() {
-  const button = document.getElementById("assessButton");
-  const inputIds = [
-    "altitudeInput",
-    "inclinationInput",
-    "eccentricityInput",
-    "durationInput",
-    "raanInput"
-  ];
-
-  async function runAssessment() {
+  document.getElementById("assessButton").onclick = async () => {
     try {
-      const orbitInput = getFormValues();
-      await updateAssessment(orbitInput);
-    } catch (error) {
-      alert(error.message || "Failed to assess orbit.");
-      console.error(error);
+      await updateAssessment(getInputs());
+    } catch (e) {
+      alert(e.message);
     }
-  }
-
-  button.addEventListener("click", runAssessment);
-
-  for (const id of inputIds) {
-    const input = document.getElementById(id);
-    input.addEventListener("keydown", async (event) => {
-      if (event.key === "Enter") {
-        await runAssessment();
-      }
-    });
-  }
+  };
 }
 
+// ========================
+// INIT
+// ========================
 async function init() {
   try {
     await loadOrbitTracks();
     setupControls();
-  } catch (error) {
-    console.error(error);
-    document.getElementById("resultsCard").innerHTML =
-      `<h2>Orbit Assessment</h2><p>Failed to load API data. Make sure the FastAPI server is running at http://127.0.0.1:8000.</p>`;
+  } catch (err) {
+    console.error(err);
+    alert("API not reachable — check deployment");
   }
 }
 
