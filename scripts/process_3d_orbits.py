@@ -1,10 +1,10 @@
 import json
 import math
+import sqlite3
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_FILE = PROJECT_ROOT / "data" / "raw_data.json"
-OUTPUT_FILE = PROJECT_ROOT / "data" / "orbit_tracks.json"
+DB_FILE = PROJECT_ROOT / "data" / "space_debris.db"
 
 EARTH_RADIUS_KM = 6378.137
 MU = 398600.4418  # km^3/s^2
@@ -106,8 +106,10 @@ def build_orbit_track(obj, num_points=96):
 
 
 def main():
-    with open(RAW_FILE, "r", encoding="utf-8") as f:
-        raw_objects = json.load(f)
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT payload_json FROM raw_objects").fetchall()
+    raw_objects = [json.loads(row["payload_json"]) for row in rows]
 
     tracks = []
 
@@ -117,10 +119,42 @@ def main():
         if track is not None:
             tracks.append(track)
 
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(tracks, f, indent=2)
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS orbit_tracks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                object_name TEXT NOT NULL,
+                altitude_km REAL NOT NULL,
+                inclination_deg REAL NOT NULL,
+                x_json TEXT NOT NULL,
+                y_json TEXT NOT NULL,
+                z_json TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute("DELETE FROM orbit_tracks")
+        conn.executemany(
+            """
+            INSERT INTO orbit_tracks (
+                object_name, altitude_km, inclination_deg, x_json, y_json, z_json
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    track["object_name"],
+                    track["altitude_km"],
+                    track["inclination_deg"],
+                    json.dumps(track["x"]),
+                    json.dumps(track["y"]),
+                    json.dumps(track["z"]),
+                )
+                for track in tracks
+            ],
+        )
+        conn.commit()
 
-    print(f"Saved {len(tracks)} orbit tracks to {OUTPUT_FILE}")
+    print(f"Saved {len(tracks)} orbit tracks to {DB_FILE} (table: orbit_tracks)")
 
 
 if __name__ == "__main__":

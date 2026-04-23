@@ -1,18 +1,17 @@
 import json
 import math
+import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 import os
 DATA_DIR = Path(os.getcwd()) / "data"
 
-ALTITUDE_BINS_FILE = DATA_DIR / "altitude_bins.json"
-ORBITAL_REGIMES_FILE = DATA_DIR / "orbital_regimes.json"
-ORBIT_TRACKS_FILE = DATA_DIR / "orbit_tracks.json"
+DB_FILE = DATA_DIR / "space_debris.db"
 
 app = FastAPI(title="Space Debris Dashboard API")
 
@@ -25,11 +24,56 @@ app.add_middleware(
 )
 
 
-def load_json(path: Path):
-    if not path.exists():
-        raise HTTPException(status_code=500, detail=f"Missing data file: {path.name}")
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+def get_db_connection() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db() -> None:
+    if not DB_FILE.exists():
+        raise RuntimeError(
+            f"Database not found: {DB_FILE}. "
+            "This backend now runs in SQL-only mode."
+        )
+
+    with get_db_connection() as conn:
+        required_tables = ("altitude_bins", "orbital_regimes", "orbit_tracks")
+        for table_name in required_tables:
+            table_exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (table_name,),
+            ).fetchone()
+            if table_exists is None:
+                raise RuntimeError(
+                    f"Missing required table '{table_name}' in {DB_FILE}. "
+                    "Rebuild or restore the database before starting the API."
+                )
+
+            row_count = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+            if row_count == 0:
+                raise RuntimeError(
+                    f"Table '{table_name}' is empty in {DB_FILE}. "
+                    "Populate the database before starting the API."
+                )
+
+
+def fetch_orbital_regimes(limit: int) -> list[dict]:
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT object_name, altitude_km, inclination_deg, eccentricity, raan_deg
+            FROM orbital_regimes
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+@app.on_event("startup")
+def startup() -> None:
+    init_db()
 
 
 def gaussian_weight(delta: float, sigma: float) -> float:
@@ -171,24 +215,53 @@ def health():
 
 @app.get("/altitude-bins")
 def get_altitude_bins():
-    return load_json(ALTITUDE_BINS_FILE)
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT altitude_bin_km, count FROM altitude_bins ORDER BY altitude_bin_km"
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 @app.get("/orbital-regimes")
 def get_orbital_regimes(limit: int = 500):
-    data = load_json(ORBITAL_REGIMES_FILE)
-    return data[:limit]
+    return fetch_orbital_regimes(limit)
 
 
 @app.get("/orbit-tracks")
 def get_orbit_tracks(limit: int = 40):
-    data = load_json(ORBIT_TRACKS_FILE)
-    return data[:limit]
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT object_name, altitude_km, inclination_deg, x_json, y_json, z_json
+            FROM orbit_tracks
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return [
+        {
+            "object_name": row["object_name"],
+            "altitude_km": row["altitude_km"],
+            "inclination_deg": row["inclination_deg"],
+            "x": json.loads(row["x_json"]),
+            "y": json.loads(row["y_json"]),
+            "z": json.loads(row["z_json"]),
+        }
+        for row in rows
+    ]
 
 
 @app.post("/assess-orbit")
 def assess_orbit(payload: OrbitAssessmentRequest):
-    orbital_regimes = load_json(ORBITAL_REGIMES_FILE)
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT object_name, altitude_km, inclination_deg, eccentricity, raan_deg
+            FROM orbital_regimes
+            """
+        ).fetchall()
+    orbital_regimes = [dict(row) for row in rows]
 
     risk_result = compute_orbit_risk(
         orbital_regimes=orbital_regimes,

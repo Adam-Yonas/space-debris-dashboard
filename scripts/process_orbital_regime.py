@@ -1,9 +1,9 @@
 import json
+import sqlite3
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_FILE = PROJECT_ROOT / "data" / "raw_data.json"
-OUTPUT_FILE = PROJECT_ROOT / "data" / "orbital_regimes.json"
+DB_FILE = PROJECT_ROOT / "data" / "space_debris.db"
 
 EARTH_RADIUS_KM = 6378.137
 
@@ -16,8 +16,10 @@ def mean_motion_to_altitude_km(mean_motion_rev_per_day: float) -> float:
 
 
 def main() -> None:
-    with open(RAW_FILE, "r", encoding="utf-8") as f:
-        objects = json.load(f)
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.row_factory = sqlite3.Row
+        raw_rows = conn.execute("SELECT payload_json FROM raw_objects").fetchall()
+    objects = [json.loads(row["payload_json"]) for row in raw_rows]
 
     processed = []
 
@@ -49,11 +51,42 @@ def main() -> None:
         except (ValueError, TypeError, ZeroDivisionError):
             continue
 
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(processed, f, indent=2)
+    DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS orbital_regimes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                object_name TEXT NOT NULL,
+                altitude_km REAL NOT NULL,
+                inclination_deg REAL NOT NULL,
+                eccentricity REAL NOT NULL DEFAULT 0.0,
+                raan_deg REAL NOT NULL DEFAULT 0.0
+            )
+            """
+        )
+        conn.execute("DELETE FROM orbital_regimes")
+        conn.executemany(
+            """
+            INSERT INTO orbital_regimes (
+                object_name, altitude_km, inclination_deg, eccentricity, raan_deg
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["object_name"],
+                    row["altitude_km"],
+                    row["inclination_deg"],
+                    row["eccentricity"],
+                    row["raan_deg"],
+                )
+                for row in processed
+            ],
+        )
+        conn.commit()
 
     print(f"Processed {len(processed)} orbital regime records")
-    print(f"Saved to: {OUTPUT_FILE}")
+    print(f"Saved to: {DB_FILE} (table: orbital_regimes)")
 
 
 if __name__ == "__main__":

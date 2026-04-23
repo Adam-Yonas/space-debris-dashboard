@@ -1,10 +1,10 @@
 import json
+import sqlite3
 from pathlib import Path
 from collections import defaultdict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_FILE = PROJECT_ROOT / "data" / "raw_data.json"
-OUTPUT_FILE = PROJECT_ROOT / "data" / "altitude_bins.json"
+DB_FILE = PROJECT_ROOT / "data" / "space_debris.db"
 
 EARTH_RADIUS_KM = 6378.137
 
@@ -20,8 +20,11 @@ def mean_motion_to_altitude_km(mean_motion_rev_per_day: float) -> float:
     return altitude
 
 def main() -> None:
-    with open(RAW_FILE, "r", encoding="utf-8") as f:
-        objects = json.load(f)
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.row_factory = sqlite3.Row
+        raw_rows = conn.execute("SELECT payload_json FROM raw_objects").fetchall()
+
+    objects = [json.loads(row["payload_json"]) for row in raw_rows]
 
     bins = defaultdict(int)
 
@@ -42,11 +45,25 @@ def main() -> None:
         for k, v in sorted(bins.items())
     ]
 
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2)
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS altitude_bins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                altitude_bin_km REAL NOT NULL,
+                count INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute("DELETE FROM altitude_bins")
+        conn.executemany(
+            "INSERT INTO altitude_bins (altitude_bin_km, count) VALUES (?, ?)",
+            [(row["altitude_bin_km"], row["count"]) for row in results],
+        )
+        conn.commit()
 
     print(f"Processed {len(objects)} objects")
-    print(f"Saved altitude bins to {OUTPUT_FILE}")
+    print(f"Saved altitude bins to {DB_FILE} (table: altitude_bins)")
 
 if __name__ == "__main__":
     main()
