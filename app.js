@@ -267,7 +267,8 @@ createApp({
         this.render3DPlot();
       } catch (err) {
         console.error(err);
-        this.aiError = err.message || "Failed to generate AI plan.";
+        this.aiPlan = null;
+        this.aiError = err.message || "Failed to generate plan.";
       } finally {
         this.loadingAI = false;
       }

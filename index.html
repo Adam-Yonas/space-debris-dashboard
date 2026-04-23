@@ -6,7 +6,7 @@
   <title>Space Debris Dashboard</title>
   <meta
     name="description"
-    content="3D orbit visualization with debris-risk assessment and AI-assisted orbit planning."
+    content="3D orbit visualization with debris-risk assessment and a free local orbit planner."
   />
   <link rel="stylesheet" href="./styles.css" />
 
@@ -18,7 +18,7 @@
     <h1>Space Debris Dashboard</h1>
     <p class="subtitle">
       3D orbit visualization with altitude, inclination, eccentricity,
-      mission-duration-based risk assessment, and an AI orbit planner.
+      mission-duration-based risk assessment, and a free local orbit planner.
     </p>
 
     <section class="controls">
@@ -90,10 +90,10 @@
     </section>
 
     <section class="ai-panel">
-      <h2>AI Orbit Planner</h2>
+      <h2>Orbit Planner</h2>
       <p>
-        Describe the mission in plain English and get a concise recommendation
-        based on the current risk model and nearby orbit alternatives.
+        Enter a plain-English mission goal to get a local recommendation based on
+        nearby orbit alternatives and the current debris-risk model.
       </p>
 
       <div class="control-group">
@@ -108,19 +108,21 @@
 
       <div class="control-group">
         <button @click="generateAIPlan" :disabled="loadingAI">
-          {{ loadingAI ? "Generating..." : "Generate AI Plan" }}
+          {{ loadingAI ? "Generating..." : "Generate Plan" }}
         </button>
       </div>
 
       <div class="results">
         <p v-if="aiError" style="color: #ff9b9b;">{{ aiError }}</p>
         <p v-if="!aiPlan && !aiError">
-          Enter a mission goal, then click "Generate AI Plan."
+          Enter a mission goal, then click "Generate Plan."
         </p>
 
         <template v-if="aiPlan">
-          <p><strong>AI summary:</strong></p>
+          <p><strong>Planner summary:</strong></p>
           <p>{{ aiPlan.ai_summary }}</p>
+
+          <p><strong>Planner type:</strong> {{ aiPlan.planner_type }}</p>
 
           <template v-if="aiPlan.best_candidate">
             <p><strong>Best candidate orbit:</strong></p>

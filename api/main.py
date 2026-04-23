@@ -1,12 +1,10 @@
 import json
 import math
-import os
 import sqlite3
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
 from pydantic import BaseModel, Field
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -17,13 +15,11 @@ app = FastAPI(title="Space Debris Dashboard API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten later if needed
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-client = OpenAI()
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -34,10 +30,7 @@ def get_db_connection() -> sqlite3.Connection:
 
 def init_db() -> None:
     if not DB_FILE.exists():
-        raise RuntimeError(
-            f"Database not found: {DB_FILE}. "
-            "This backend now runs in SQL-only mode."
-        )
+        raise RuntimeError(f"Database not found: {DB_FILE}")
 
     with get_db_connection() as conn:
         required_tables = ("altitude_bins", "orbital_regimes", "orbit_tracks")
@@ -49,8 +42,7 @@ def init_db() -> None:
 
             if table_exists is None:
                 raise RuntimeError(
-                    f"Missing required table '{table_name}' in {DB_FILE}. "
-                    "Rebuild or restore the database before starting the API."
+                    f"Missing required table '{table_name}' in {DB_FILE}"
                 )
 
             row_count = conn.execute(
@@ -59,8 +51,7 @@ def init_db() -> None:
 
             if row_count == 0:
                 raise RuntimeError(
-                    f"Table '{table_name}' is empty in {DB_FILE}. "
-                    "Populate the database before starting the API."
+                    f"Table '{table_name}' is empty in {DB_FILE}"
                 )
 
 
@@ -162,7 +153,7 @@ def compute_orbit_risk(
         risk_level = "High"
 
     return {
-        "weighted_risk": weighted_risk,
+        "weighted_risk": round(weighted_risk, 4),
         "risk_score": normalized_score,
         "risk_level": risk_level,
         "close_matches": close_matches,
@@ -184,7 +175,7 @@ def get_recommendation(
 
     for offset in candidate_offsets:
         candidate_altitude = altitude_km + offset
-        if candidate_altitude <= 0:
+        if candidate_altitude <= 160:
             continue
 
         result = compute_orbit_risk(
@@ -279,7 +270,14 @@ def build_candidate_orbits(
             "mission_years": mission_years,
         },
         {
-            "altitude_km": altitude_km - 100 if altitude_km - 100 >= 160 else altitude_km,
+            "altitude_km": max(160, altitude_km - 100),
+            "inclination_deg": inclination_deg,
+            "eccentricity": eccentricity,
+            "raan_deg": raan_deg,
+            "mission_years": mission_years,
+        },
+        {
+            "altitude_km": altitude_km + 100,
             "inclination_deg": inclination_deg,
             "eccentricity": eccentricity,
             "raan_deg": raan_deg,
@@ -317,6 +315,77 @@ def build_candidate_orbits(
             unique_candidates.append(candidate)
 
     return unique_candidates
+
+
+def generate_local_ai_summary(
+    mission_goal: str,
+    current_orbit: dict,
+    current_assessment: dict,
+    best_candidate: dict | None,
+) -> str:
+    current_result = current_assessment["result"]
+    current_score = current_result["risk_score"]
+    current_level = current_result["risk_level"]
+    current_matches = current_result["close_matches"]
+
+    goal_text = mission_goal.strip()
+
+    if best_candidate is None:
+        return (
+            f"For the mission goal '{goal_text}', the current orbit is assessed as "
+            f"{current_level.lower()} risk with a score of {current_score}/100 and "
+            f"{current_matches} nearby tracked-object matches. No clearly better nearby "
+            f"candidate was identified in this local search, so the current orbit may "
+            f"already be near the best available option within this simplified model. "
+            f"A good next step would be testing a wider altitude or inclination range."
+        )
+
+    candidate_orbit = best_candidate["orbit"]
+    candidate_result = best_candidate["result"]
+
+    candidate_score = candidate_result["risk_score"]
+    candidate_level = candidate_result["risk_level"]
+    delta = current_score - candidate_score
+
+    if delta >= 20:
+        improvement_text = "a strong reduction in modeled debris risk"
+    elif delta >= 10:
+        improvement_text = "a meaningful reduction in modeled debris risk"
+    elif delta > 0:
+        improvement_text = "a modest reduction in modeled debris risk"
+    else:
+        improvement_text = "roughly similar modeled risk"
+
+    caution_text = (
+        "this recommendation only reflects the debris-risk model and does not include "
+        "coverage, drag, propulsion, or regulatory constraints"
+    )
+
+    if candidate_orbit["altitude_km"] < current_orbit["altitude_km"]:
+        caution_text = (
+            "the lower altitude could reduce modeled debris exposure but may increase "
+            "drag and station-keeping needs"
+        )
+    elif candidate_orbit["altitude_km"] > current_orbit["altitude_km"]:
+        caution_text = (
+            "the higher altitude may improve local modeled risk, but it may affect "
+            "mission lifetime and operational tradeoffs differently"
+        )
+    elif abs(candidate_orbit["inclination_deg"] - current_orbit["inclination_deg"]) >= 1.5:
+        caution_text = (
+            "the inclination change may affect ground coverage and mission geometry"
+        )
+
+    return (
+        f"For the mission goal '{goal_text}', the current orbit is assessed as "
+        f"{current_level.lower()} risk with a score of {current_score}/100 and "
+        f"{current_matches} nearby tracked-object matches. The best nearby option from "
+        f"this search is approximately {candidate_orbit['altitude_km']} km altitude, "
+        f"{candidate_orbit['inclination_deg']}° inclination, eccentricity "
+        f"{candidate_orbit['eccentricity']}, and RAAN {candidate_orbit['raan_deg']}°. "
+        f"That candidate scores {candidate_score}/100 ({candidate_level.lower()} risk), "
+        f"which suggests {improvement_text}. The main caution is that {caution_text}."
+    )
 
 
 class OrbitAssessmentRequest(BaseModel):
@@ -409,6 +478,8 @@ def assess_orbit(payload: OrbitAssessmentRequest):
 def ai_orbit_plan(payload: AIOrbitPlanRequest):
     orbital_regimes = fetch_all_orbital_regimes()
 
+    current_orbit = payload.model_dump()
+
     current_assessment = evaluate_orbit(
         orbital_regimes=orbital_regimes,
         altitude_km=payload.altitude_km,
@@ -449,52 +520,26 @@ def ai_orbit_plan(payload: AIOrbitPlanRequest):
         key=lambda item: item["result"]["risk_score"]
     )
 
-    best_candidate = sorted_candidates[0] if sorted_candidates else None
+    best_candidate = None
+    if sorted_candidates:
+        best_candidate = sorted_candidates[0]
+        current_score = current_assessment["result"]["risk_score"]
+        best_score = best_candidate["result"]["risk_score"]
+        if best_score >= current_score:
+            best_candidate = None
 
-    prompt = f"""
-You are helping a satellite mission designer choose a safer orbit.
-
-Mission goal:
-{payload.mission_goal}
-
-Current proposed orbit:
-{{
-  "altitude_km": {payload.altitude_km},
-  "inclination_deg": {payload.inclination_deg},
-  "eccentricity": {payload.eccentricity},
-  "raan_deg": {payload.raan_deg},
-  "mission_years": {payload.mission_years}
-}}
-
-Current orbit assessment:
-{json.dumps(current_assessment, indent=2)}
-
-Candidate orbit assessments:
-{json.dumps(candidate_assessments, indent=2)}
-
-Best candidate by lowest risk score:
-{json.dumps(best_candidate, indent=2) if best_candidate else "None"}
-
-Write a concise answer for a user interface.
-
-Requirements:
-- Explain the current orbit's risk in plain English
-- Recommend the best candidate orbit
-- State why it is better
-- Mention one tradeoff or caution
-- Keep it under 220 words
-- Do not invent physics beyond the provided data
-"""
-
-    response = client.responses.create(
-        model="gpt-5",
-        input=prompt,
+    ai_summary = generate_local_ai_summary(
+        mission_goal=payload.mission_goal,
+        current_orbit=current_orbit,
+        current_assessment=current_assessment,
+        best_candidate=best_candidate,
     )
 
     return {
-        "current_orbit": payload.model_dump(),
+        "current_orbit": current_orbit,
         "current_assessment": current_assessment,
         "candidate_assessments": candidate_assessments,
         "best_candidate": best_candidate,
-        "ai_summary": response.output_text,
+        "ai_summary": ai_summary,
+        "planner_type": "local-rule-based",
     }
