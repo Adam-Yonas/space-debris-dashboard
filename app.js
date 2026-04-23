@@ -163,6 +163,8 @@ createApp({
           y: track.y,
           z: track.z,
           name: track.object_name ? String(track.object_name) : "Unknown Object",
+          hovertemplate:
+            `<b>${track.object_name ? String(track.object_name) : "Unknown Object"}</b><extra></extra>`,
           line: { width: 2, color: "#7ea6ff" },
           opacity: 0.35,
         });
