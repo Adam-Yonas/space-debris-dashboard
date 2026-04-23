@@ -9,8 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 import os
-DATA_DIR = Path(os.getcwd()) / "data"
-
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = BASE_DIR / "data"
 DB_FILE = DATA_DIR / "space_debris.db"
 
 app = FastAPI(title="Space Debris Dashboard API")
