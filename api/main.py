@@ -317,6 +317,37 @@ def build_candidate_orbits(
     return unique_candidates
 
 
+def score_candidate_for_goal(candidate: dict, result: dict, mission_goal: str) -> float:
+    goal = mission_goal.lower()
+    score = float(result["risk_score"])
+
+    altitude = float(candidate["orbit"]["altitude_km"])
+    inclination = float(candidate["orbit"]["inclination_deg"])
+
+    if "under 650" in goal and altitude > 650:
+        score += 20
+    if "under 600" in goal and altitude > 600:
+        score += 20
+    if "under 550" in goal and altitude > 550:
+        score += 20
+
+    if "long mission" in goal or "5-year" in goal or "10-year" in goal:
+        if altitude < 400:
+            score += 10
+
+    if "earth observation" in goal or "polar" in goal:
+        if inclination < 80:
+            score += 15
+
+    if "low altitude" in goal and altitude > 700:
+        score += 10
+
+    if "safer" in goal or "low risk" in goal:
+        score -= 5
+
+    return score
+
+
 def generate_local_ai_summary(
     mission_goal: str,
     current_orbit: dict,
@@ -329,6 +360,7 @@ def generate_local_ai_summary(
     current_matches = current_result["close_matches"]
 
     goal_text = mission_goal.strip()
+    goal = goal_text.lower()
 
     if best_candidate is None:
         return (
@@ -376,6 +408,20 @@ def generate_local_ai_summary(
             "the inclination change may affect ground coverage and mission geometry"
         )
 
+    goal_notes = []
+    if "under 650" in goal:
+        goal_notes.append("it stays within the requested altitude limit")
+    if "under 600" in goal:
+        goal_notes.append("it stays within the tighter altitude ceiling")
+    if "earth observation" in goal or "polar" in goal:
+        goal_notes.append("it better matches high-inclination observation-style orbits")
+    if "long mission" in goal or "5-year" in goal or "10-year" in goal:
+        goal_notes.append("it avoids pushing too low in altitude for a longer mission")
+
+    goal_reason = ""
+    if goal_notes:
+        goal_reason = " It is preferred because " + ", and ".join(goal_notes) + "."
+
     return (
         f"For the mission goal '{goal_text}', the current orbit is assessed as "
         f"{current_level.lower()} risk with a score of {current_score}/100 and "
@@ -384,7 +430,7 @@ def generate_local_ai_summary(
         f"{candidate_orbit['inclination_deg']}° inclination, eccentricity "
         f"{candidate_orbit['eccentricity']}, and RAAN {candidate_orbit['raan_deg']}°. "
         f"That candidate scores {candidate_score}/100 ({candidate_level.lower()} risk), "
-        f"which suggests {improvement_text}. The main caution is that {caution_text}."
+        f"which suggests {improvement_text}.{goal_reason} The main caution is that {caution_text}."
     )
 
 
@@ -515,17 +561,24 @@ def ai_orbit_plan(payload: AIOrbitPlanRequest):
             }
         )
 
-    sorted_candidates = sorted(
-        candidate_assessments,
-        key=lambda item: item["result"]["risk_score"]
-    )
-
     best_candidate = None
-    if sorted_candidates:
-        best_candidate = sorted_candidates[0]
+    best_adjusted_score = float("inf")
+
+    for candidate in candidate_assessments:
+        adjusted_score = score_candidate_for_goal(
+            candidate,
+            candidate["result"],
+            payload.mission_goal,
+        )
+
+        if adjusted_score < best_adjusted_score:
+            best_adjusted_score = adjusted_score
+            best_candidate = candidate
+
+    if best_candidate is not None:
         current_score = current_assessment["result"]["risk_score"]
-        best_score = best_candidate["result"]["risk_score"]
-        if best_score >= current_score:
+        best_raw_score = best_candidate["result"]["risk_score"]
+        if best_raw_score >= current_score:
             best_candidate = None
 
     ai_summary = generate_local_ai_summary(
