@@ -162,7 +162,6 @@ createApp({
           x: track.x,
           y: track.y,
           z: track.z,
-          name: track.object_name || "Unknown Object", // 👈 THIS LINE
           line: { width: 2, color: "#7ea6ff" },
           opacity: 0.35,
         });
