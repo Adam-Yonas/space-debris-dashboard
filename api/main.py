@@ -1,14 +1,14 @@
 import json
 import math
+import os
 import sqlite3
 from pathlib import Path
-from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from openai import OpenAI
 from pydantic import BaseModel, Field
 
-import os
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 DB_FILE = DATA_DIR / "space_debris.db"
@@ -22,6 +22,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+client = OpenAI()
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -44,13 +46,17 @@ def init_db() -> None:
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
                 (table_name,),
             ).fetchone()
+
             if table_exists is None:
                 raise RuntimeError(
                     f"Missing required table '{table_name}' in {DB_FILE}. "
                     "Rebuild or restore the database before starting the API."
                 )
 
-            row_count = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+            row_count = conn.execute(
+                f"SELECT COUNT(*) FROM {table_name}"
+            ).fetchone()[0]
+
             if row_count == 0:
                 raise RuntimeError(
                     f"Table '{table_name}' is empty in {DB_FILE}. "
@@ -68,6 +74,19 @@ def fetch_orbital_regimes(limit: int) -> list[dict]:
             """,
             (limit,),
         ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def fetch_all_orbital_regimes() -> list[dict]:
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT object_name, altitude_km, inclination_deg, eccentricity, raan_deg
+            FROM orbital_regimes
+            """
+        ).fetchall()
+
     return [dict(row) for row in rows]
 
 
@@ -86,13 +105,13 @@ def angular_difference_deg(a: float, b: float) -> float:
 
 
 def compute_orbit_risk(
-    orbital_regimes,
+    orbital_regimes: list[dict],
     altitude_km: float,
     inclination_deg: float,
     eccentricity: float,
     raan_deg: float,
     mission_years: float,
-):
+) -> dict:
     sigma_altitude_km = 75
     sigma_inclination_deg = 5
     sigma_eccentricity = 0.01
@@ -152,14 +171,14 @@ def compute_orbit_risk(
 
 
 def get_recommendation(
-    orbital_regimes,
+    orbital_regimes: list[dict],
     altitude_km: float,
     inclination_deg: float,
     eccentricity: float,
     raan_deg: float,
     mission_years: float,
     current_score: int,
-):
+) -> str:
     candidate_offsets = [-150, -100, -50, 50, 100, 150]
     best_option = None
 
@@ -178,7 +197,6 @@ def get_recommendation(
         )
 
         score = result["risk_score"]
-
         if score < current_score:
             if best_option is None or score < best_option["score"]:
                 best_option = {
@@ -187,7 +205,10 @@ def get_recommendation(
                 }
 
     if best_option is None:
-        return "No clearly better nearby altitude band was found with the current simplified model."
+        return (
+            "No clearly better nearby altitude band was found with the current "
+            "simplified model."
+        )
 
     return (
         f"A nearby lower-risk option is approximately "
@@ -195,7 +216,119 @@ def get_recommendation(
     )
 
 
+def evaluate_orbit(
+    orbital_regimes: list[dict],
+    altitude_km: float,
+    inclination_deg: float,
+    eccentricity: float,
+    raan_deg: float,
+    mission_years: float,
+) -> dict:
+    risk_result = compute_orbit_risk(
+        orbital_regimes=orbital_regimes,
+        altitude_km=altitude_km,
+        inclination_deg=inclination_deg,
+        eccentricity=eccentricity,
+        raan_deg=raan_deg,
+        mission_years=mission_years,
+    )
+
+    recommendation = get_recommendation(
+        orbital_regimes=orbital_regimes,
+        altitude_km=altitude_km,
+        inclination_deg=inclination_deg,
+        eccentricity=eccentricity,
+        raan_deg=raan_deg,
+        mission_years=mission_years,
+        current_score=risk_result["risk_score"],
+    )
+
+    return {
+        "result": risk_result,
+        "recommendation": recommendation,
+    }
+
+
+def build_candidate_orbits(
+    altitude_km: float,
+    inclination_deg: float,
+    eccentricity: float,
+    raan_deg: float,
+    mission_years: float,
+) -> list[dict]:
+    raw_candidates = [
+        {
+            "altitude_km": altitude_km,
+            "inclination_deg": inclination_deg,
+            "eccentricity": eccentricity,
+            "raan_deg": raan_deg,
+            "mission_years": mission_years,
+        },
+        {
+            "altitude_km": max(160, altitude_km - 50),
+            "inclination_deg": inclination_deg,
+            "eccentricity": eccentricity,
+            "raan_deg": raan_deg,
+            "mission_years": mission_years,
+        },
+        {
+            "altitude_km": altitude_km + 50,
+            "inclination_deg": inclination_deg,
+            "eccentricity": eccentricity,
+            "raan_deg": raan_deg,
+            "mission_years": mission_years,
+        },
+        {
+            "altitude_km": altitude_km - 100 if altitude_km - 100 >= 160 else altitude_km,
+            "inclination_deg": inclination_deg,
+            "eccentricity": eccentricity,
+            "raan_deg": raan_deg,
+            "mission_years": mission_years,
+        },
+        {
+            "altitude_km": altitude_km,
+            "inclination_deg": max(0, inclination_deg - 2),
+            "eccentricity": eccentricity,
+            "raan_deg": raan_deg,
+            "mission_years": mission_years,
+        },
+        {
+            "altitude_km": altitude_km,
+            "inclination_deg": min(180, inclination_deg + 2),
+            "eccentricity": eccentricity,
+            "raan_deg": raan_deg,
+            "mission_years": mission_years,
+        },
+    ]
+
+    seen = set()
+    unique_candidates = []
+
+    for candidate in raw_candidates:
+        key = (
+            round(candidate["altitude_km"], 3),
+            round(candidate["inclination_deg"], 3),
+            round(candidate["eccentricity"], 6),
+            round(candidate["raan_deg"], 3),
+            round(candidate["mission_years"], 3),
+        )
+        if key not in seen:
+            seen.add(key)
+            unique_candidates.append(candidate)
+
+    return unique_candidates
+
+
 class OrbitAssessmentRequest(BaseModel):
+    altitude_km: float = Field(..., ge=160, le=40000)
+    inclination_deg: float = Field(..., ge=0, le=180)
+    eccentricity: float = Field(0.0, ge=0, le=0.2)
+    mission_years: float = Field(1.0, gt=0, le=20)
+    raan_deg: float = Field(0.0, ge=0, le=360)
+
+
+class AIOrbitPlanRequest(BaseModel):
+    mission_goal: str = Field(..., min_length=5, max_length=1000)
     altitude_km: float = Field(..., ge=160, le=40000)
     inclination_deg: float = Field(..., ge=0, le=180)
     eccentricity: float = Field(0.0, ge=0, le=0.2)
@@ -254,36 +387,114 @@ def get_orbit_tracks(limit: int = 40):
 
 @app.post("/assess-orbit")
 def assess_orbit(payload: OrbitAssessmentRequest):
-    with get_db_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT object_name, altitude_km, inclination_deg, eccentricity, raan_deg
-            FROM orbital_regimes
-            """
-        ).fetchall()
-    orbital_regimes = [dict(row) for row in rows]
+    orbital_regimes = fetch_all_orbital_regimes()
 
-    risk_result = compute_orbit_risk(
+    assessment = evaluate_orbit(
         orbital_regimes=orbital_regimes,
         altitude_km=payload.altitude_km,
         inclination_deg=payload.inclination_deg,
         eccentricity=payload.eccentricity,
         raan_deg=payload.raan_deg,
         mission_years=payload.mission_years,
-    )
-
-    recommendation = get_recommendation(
-        orbital_regimes=orbital_regimes,
-        altitude_km=payload.altitude_km,
-        inclination_deg=payload.inclination_deg,
-        eccentricity=payload.eccentricity,
-        raan_deg=payload.raan_deg,
-        mission_years=payload.mission_years,
-        current_score=risk_result["risk_score"],
     )
 
     return {
         "input": payload.model_dump(),
-        "result": risk_result,
-        "recommendation": recommendation,
+        "result": assessment["result"],
+        "recommendation": assessment["recommendation"],
+    }
+
+
+@app.post("/ai-orbit-plan")
+def ai_orbit_plan(payload: AIOrbitPlanRequest):
+    orbital_regimes = fetch_all_orbital_regimes()
+
+    current_assessment = evaluate_orbit(
+        orbital_regimes=orbital_regimes,
+        altitude_km=payload.altitude_km,
+        inclination_deg=payload.inclination_deg,
+        eccentricity=payload.eccentricity,
+        raan_deg=payload.raan_deg,
+        mission_years=payload.mission_years,
+    )
+
+    candidates = build_candidate_orbits(
+        altitude_km=payload.altitude_km,
+        inclination_deg=payload.inclination_deg,
+        eccentricity=payload.eccentricity,
+        raan_deg=payload.raan_deg,
+        mission_years=payload.mission_years,
+    )
+
+    candidate_assessments = []
+    for candidate in candidates:
+        assessment = evaluate_orbit(
+            orbital_regimes=orbital_regimes,
+            altitude_km=candidate["altitude_km"],
+            inclination_deg=candidate["inclination_deg"],
+            eccentricity=candidate["eccentricity"],
+            raan_deg=candidate["raan_deg"],
+            mission_years=candidate["mission_years"],
+        )
+        candidate_assessments.append(
+            {
+                "orbit": candidate,
+                "result": assessment["result"],
+                "recommendation": assessment["recommendation"],
+            }
+        )
+
+    sorted_candidates = sorted(
+        candidate_assessments,
+        key=lambda item: item["result"]["risk_score"]
+    )
+
+    best_candidate = sorted_candidates[0] if sorted_candidates else None
+
+    prompt = f"""
+You are helping a satellite mission designer choose a safer orbit.
+
+Mission goal:
+{payload.mission_goal}
+
+Current proposed orbit:
+{{
+  "altitude_km": {payload.altitude_km},
+  "inclination_deg": {payload.inclination_deg},
+  "eccentricity": {payload.eccentricity},
+  "raan_deg": {payload.raan_deg},
+  "mission_years": {payload.mission_years}
+}}
+
+Current orbit assessment:
+{json.dumps(current_assessment, indent=2)}
+
+Candidate orbit assessments:
+{json.dumps(candidate_assessments, indent=2)}
+
+Best candidate by lowest risk score:
+{json.dumps(best_candidate, indent=2) if best_candidate else "None"}
+
+Write a concise answer for a user interface.
+
+Requirements:
+- Explain the current orbit's risk in plain English
+- Recommend the best candidate orbit
+- State why it is better
+- Mention one tradeoff or caution
+- Keep it under 220 words
+- Do not invent physics beyond the provided data
+"""
+
+    response = client.responses.create(
+        model="gpt-5",
+        input=prompt,
+    )
+
+    return {
+        "current_orbit": payload.model_dump(),
+        "current_assessment": current_assessment,
+        "candidate_assessments": candidate_assessments,
+        "best_candidate": best_candidate,
+        "ai_summary": response.output_text,
     }

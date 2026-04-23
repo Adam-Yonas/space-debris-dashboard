@@ -7,10 +7,20 @@ createApp({
     return {
       orbitTracks: [],
       currentUserOrbit: null,
-      loading: false,
+
+      loadingAssessment: false,
+      loadingAI: false,
+
       error: "",
+      aiError: "",
+
       assessment: null,
       recommendation: "",
+
+      aiPlan: null,
+      missionGoal:
+        "I want a lower-risk Earth observation orbit under 650 km for a 3-year mission.",
+
       form: {
         altitude_km: 550,
         inclination_deg: 97.6,
@@ -26,18 +36,27 @@ createApp({
       if (!this.currentUserOrbit) return "";
       return `Orbit: ${this.currentUserOrbit.altitude_km} km, ${this.currentUserOrbit.inclination_deg}°`;
     },
+
     riskScoreText() {
       return this.assessment ? `Risk: ${this.assessment.risk_score}/100` : "";
     },
+
     riskLevelText() {
       return this.assessment ? `Level: ${this.assessment.risk_level}` : "";
     },
+
     matchingObjectsText() {
-      return this.assessment ? `Nearby objects: ${this.assessment.close_matches}` : "";
+      return this.assessment
+        ? `Nearby objects: ${this.assessment.close_matches}`
+        : "";
     },
+
     missionExposureText() {
-      return this.assessment ? `Duration factor: ${this.assessment.duration_factor}x` : "";
+      return this.assessment
+        ? `Duration factor: ${this.assessment.duration_factor}x`
+        : "";
     },
+
     recommendationText() {
       return this.recommendation || "";
     },
@@ -46,11 +65,23 @@ createApp({
   methods: {
     async fetchJson(url, options = {}) {
       const response = await fetch(url, options);
+
       if (!response.ok) {
         const text = await response.text();
         throw new Error(`Request failed: ${response.status} ${text}`);
       }
+
       return await response.json();
+    },
+
+    getCurrentPayload() {
+      return {
+        altitude_km: Number(this.form.altitude_km),
+        inclination_deg: Number(this.form.inclination_deg),
+        eccentricity: Number(this.form.eccentricity),
+        mission_years: Number(this.form.mission_years),
+        raan_deg: Number(this.form.raan_deg || 0),
+      };
     },
 
     async loadOrbitTracks() {
@@ -66,13 +97,13 @@ createApp({
       const z = [];
 
       for (let i = 0; i <= 40; i++) {
-        const theta = Math.PI * i / 40;
+        const theta = (Math.PI * i) / 40;
         const xr = [];
         const yr = [];
         const zr = [];
 
         for (let j = 0; j <= 40; j++) {
-          const phi = 2 * Math.PI * j / 40;
+          const phi = (2 * Math.PI * j) / 40;
           xr.push(R * Math.sin(theta) * Math.cos(phi));
           yr.push(R * Math.sin(theta) * Math.sin(phi));
           zr.push(R * Math.cos(theta));
@@ -95,15 +126,17 @@ createApp({
 
     buildUserOrbitTrack(alt, incDeg, ecc = 0, raanDeg = 0) {
       const R = 6378.137 + alt;
-      const inc = incDeg * Math.PI / 180;
-      const raan = raanDeg * Math.PI / 180;
+      const inc = (incDeg * Math.PI) / 180;
+      const raan = (raanDeg * Math.PI) / 180;
+
       const x = [];
       const y = [];
       const z = [];
 
       for (let k = 0; k <= 128; k++) {
-        const nu = 2 * Math.PI * k / 128;
-        const r = R * (1 - ecc ** 2) / (1 + ecc * Math.cos(nu));
+        const nu = (2 * Math.PI * k) / 128;
+        const r = (R * (1 - ecc ** 2)) / (1 + ecc * Math.cos(nu));
+
         const xp = r * Math.cos(nu);
         const yp = r * Math.sin(nu);
 
@@ -130,7 +163,7 @@ createApp({
           y: track.y,
           z: track.z,
           line: { width: 2, color: "#7ea6ff" },
-          opacity: 0.4,
+          opacity: 0.35,
         });
       }
 
@@ -149,6 +182,7 @@ createApp({
           y: userTrack.y,
           z: userTrack.z,
           line: { width: 6, color: "#ff9f43" },
+          name: "Selected Orbit",
         });
       }
 
@@ -163,17 +197,11 @@ createApp({
     },
 
     async assessOrbit() {
-      this.loading = true;
+      this.loadingAssessment = true;
       this.error = "";
 
       try {
-        const payload = {
-          altitude_km: Number(this.form.altitude_km),
-          inclination_deg: Number(this.form.inclination_deg),
-          eccentricity: Number(this.form.eccentricity),
-          mission_years: Number(this.form.mission_years),
-          raan_deg: Number(this.form.raan_deg || 0),
-        };
+        const payload = this.getCurrentPayload();
 
         const res = await this.fetchJson(`${API_BASE}/assess-orbit`, {
           method: "POST",
@@ -193,7 +221,55 @@ createApp({
         console.error(err);
         this.error = err.message || "Failed to assess orbit.";
       } finally {
-        this.loading = false;
+        this.loadingAssessment = false;
+      }
+    },
+
+    async generateAIPlan() {
+      this.loadingAI = true;
+      this.aiError = "";
+      this.aiPlan = null;
+
+      try {
+        const payload = {
+          ...this.getCurrentPayload(),
+          mission_goal: this.missionGoal.trim(),
+        };
+
+        if (!payload.mission_goal) {
+          throw new Error("Please enter a mission goal first.");
+        }
+
+        const res = await this.fetchJson(`${API_BASE}/ai-orbit-plan`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+
+        this.aiPlan = res;
+
+        this.currentUserOrbit = {
+          altitude_km: payload.altitude_km,
+          inclination_deg: payload.inclination_deg,
+          eccentricity: payload.eccentricity,
+          mission_years: payload.mission_years,
+          raan_deg: payload.raan_deg,
+        };
+
+        if (res.current_assessment && res.current_assessment.result) {
+          this.assessment = res.current_assessment.result;
+          this.recommendation = res.current_assessment.recommendation || "";
+        }
+
+        await nextTick();
+        this.render3DPlot();
+      } catch (err) {
+        console.error(err);
+        this.aiError = err.message || "Failed to generate AI plan.";
+      } finally {
+        this.loadingAI = false;
       }
     },
   },

@@ -4,7 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Space Debris Dashboard</title>
+  <meta
+    name="description"
+    content="3D orbit visualization with debris-risk assessment and AI-assisted orbit planning."
+  />
   <link rel="stylesheet" href="./styles.css" />
+
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 </head>
@@ -12,7 +17,8 @@
   <main id="app">
     <h1>Space Debris Dashboard</h1>
     <p class="subtitle">
-      3D orbit visualization with altitude, inclination, eccentricity, and mission-duration-based risk assessment.
+      3D orbit visualization with altitude, inclination, eccentricity,
+      mission-duration-based risk assessment, and an AI orbit planner.
     </p>
 
     <section class="controls">
@@ -28,17 +34,27 @@
 
       <div class="control-group">
         <label for="eccentricityInput">Proposed eccentricity</label>
-        <input id="eccentricityInput" type="number" step="0.001" v-model.number="form.eccentricity" />
+        <input
+          id="eccentricityInput"
+          type="number"
+          step="0.001"
+          v-model.number="form.eccentricity"
+        />
       </div>
 
       <div class="control-group">
         <label for="durationInput">Mission duration (years)</label>
-        <input id="durationInput" type="number" step="0.1" v-model.number="form.mission_years" />
+        <input
+          id="durationInput"
+          type="number"
+          step="0.1"
+          v-model.number="form.mission_years"
+        />
       </div>
 
       <div class="control-group">
-        <button @click="assessOrbit" :disabled="loading">
-          {{ loading ? "Assessing..." : "Assess Orbit" }}
+        <button @click="assessOrbit" :disabled="loadingAssessment">
+          {{ loadingAssessment ? "Assessing..." : "Assess Orbit" }}
         </button>
       </div>
     </section>
@@ -57,8 +73,11 @@
 
     <section class="results">
       <h2>Orbit Assessment</h2>
+
       <p v-if="error" style="color: #ff9b9b;">{{ error }}</p>
-      <p v-if="!assessment && !error">Enter orbit parameters, then click "Assess Orbit."</p>
+      <p v-if="!assessment && !error">
+        Enter orbit parameters, then click "Assess Orbit."
+      </p>
 
       <template v-if="assessment">
         <p>{{ selectedOrbitText }}</p>
@@ -68,6 +87,56 @@
         <p>{{ missionExposureText }}</p>
         <p>{{ recommendationText }}</p>
       </template>
+    </section>
+
+    <section class="ai-panel">
+      <h2>AI Orbit Planner</h2>
+      <p>
+        Describe the mission in plain English and get a concise recommendation
+        based on the current risk model and nearby orbit alternatives.
+      </p>
+
+      <div class="control-group">
+        <label for="missionGoalInput">Mission goal</label>
+        <textarea
+          id="missionGoalInput"
+          rows="5"
+          v-model="missionGoal"
+          placeholder="Example: I want a lower-risk Earth observation orbit under 650 km for a 3-year mission."
+        ></textarea>
+      </div>
+
+      <div class="control-group">
+        <button @click="generateAIPlan" :disabled="loadingAI">
+          {{ loadingAI ? "Generating..." : "Generate AI Plan" }}
+        </button>
+      </div>
+
+      <div class="results">
+        <p v-if="aiError" style="color: #ff9b9b;">{{ aiError }}</p>
+        <p v-if="!aiPlan && !aiError">
+          Enter a mission goal, then click "Generate AI Plan."
+        </p>
+
+        <template v-if="aiPlan">
+          <p><strong>AI summary:</strong></p>
+          <p>{{ aiPlan.ai_summary }}</p>
+
+          <template v-if="aiPlan.best_candidate">
+            <p><strong>Best candidate orbit:</strong></p>
+            <p>
+              Altitude: {{ aiPlan.best_candidate.orbit.altitude_km }} km |
+              Inclination: {{ aiPlan.best_candidate.orbit.inclination_deg }}° |
+              Eccentricity: {{ aiPlan.best_candidate.orbit.eccentricity }} |
+              RAAN: {{ aiPlan.best_candidate.orbit.raan_deg }}°
+            </p>
+            <p>
+              Candidate risk: {{ aiPlan.best_candidate.result.risk_score }}/100
+              ({{ aiPlan.best_candidate.result.risk_level }})
+            </p>
+          </template>
+        </template>
+      </div>
     </section>
 
     <section class="chart-section">
