@@ -4,11 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Space Debris Dashboard</title>
+  <link rel="stylesheet" href="./styles.css" />
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <link rel="stylesheet" href="styles.css" />
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 </head>
 <body>
-  <main>
+  <main id="app">
     <h1>Space Debris Dashboard</h1>
     <p class="subtitle">
       3D orbit visualization with altitude, inclination, eccentricity, and mission-duration-based risk assessment.
@@ -17,25 +18,29 @@
     <section class="controls">
       <div class="control-group">
         <label for="altitudeInput">Proposed orbit altitude (km)</label>
-        <input id="altitudeInput" type="number" min="160" max="40000" step="1" placeholder="e.g. 550" />
+        <input id="altitudeInput" type="number" v-model.number="form.altitude_km" />
       </div>
 
       <div class="control-group">
         <label for="inclinationInput">Proposed inclination (deg)</label>
-        <input id="inclinationInput" type="number" min="0" max="180" step="0.1" placeholder="e.g. 97.6" />
+        <input id="inclinationInput" type="number" v-model.number="form.inclination_deg" />
       </div>
 
       <div class="control-group">
         <label for="eccentricityInput">Proposed eccentricity</label>
-        <input id="eccentricityInput" type="number" min="0" max="0.2" step="0.001" placeholder="e.g. 0.001" />
+        <input id="eccentricityInput" type="number" step="0.001" v-model.number="form.eccentricity" />
       </div>
 
       <div class="control-group">
         <label for="durationInput">Mission duration (years)</label>
-        <input id="durationInput" type="number" min="0.1" max="20" step="0.1" placeholder="e.g. 3" />
+        <input id="durationInput" type="number" step="0.1" v-model.number="form.mission_years" />
       </div>
 
-      <button id="assessButton">Assess Orbit</button>
+      <div class="control-group">
+        <button @click="assessOrbit" :disabled="loading">
+          {{ loading ? "Assessing..." : "Assess Orbit" }}
+        </button>
+      </div>
     </section>
 
     <section class="advanced-panel">
@@ -44,20 +49,25 @@
         <div class="advanced-grid">
           <div class="control-group">
             <label for="raanInput">RAAN (deg)</label>
-            <input id="raanInput" type="number" min="0" max="360" step="0.1" placeholder="e.g. 15" />
+            <input id="raanInput" type="number" v-model.number="form.raan_deg" />
           </div>
         </div>
       </details>
     </section>
 
-    <section class="results" id="resultsCard">
+    <section class="results">
       <h2>Orbit Assessment</h2>
-      <p id="selectedOrbit">Enter orbit parameters, then click "Assess Orbit."</p>
-      <p id="riskScore"></p>
-      <p id="riskLevel"></p>
-      <p id="matchingObjects"></p>
-      <p id="missionExposure"></p>
-      <p id="recommendation"></p>
+      <p v-if="error" style="color: #ff9b9b;">{{ error }}</p>
+      <p v-if="!assessment && !error">Enter orbit parameters, then click "Assess Orbit."</p>
+
+      <template v-if="assessment">
+        <p>{{ selectedOrbitText }}</p>
+        <p>{{ riskScoreText }}</p>
+        <p>{{ riskLevelText }}</p>
+        <p>{{ matchingObjectsText }}</p>
+        <p>{{ missionExposureText }}</p>
+        <p>{{ recommendationText }}</p>
+      </template>
     </section>
 
     <section class="chart-section">
@@ -65,6 +75,6 @@
     </section>
   </main>
 
-  <script src="app.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
