@@ -86,6 +86,7 @@ createApp({
 
     async loadOrbitTracks() {
       this.orbitTracks = await this.fetchJson(`${API_BASE}/orbit-tracks?limit=40`);
+      console.log("orbitTracks:", this.orbitTracks);
       await nextTick();
       this.render3DPlot();
     },
